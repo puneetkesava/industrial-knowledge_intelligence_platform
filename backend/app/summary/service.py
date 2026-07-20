@@ -164,7 +164,7 @@ class SummaryService:
             model_id=model.id,
         )
         self.session.add(row)
-        self.session.flush()
+        self.session.commit()
 
     @staticmethod
     def _build_key_specs(model: MotorModel) -> list[KeySpecOut]:
@@ -194,6 +194,10 @@ class SummaryService:
                 motor_type_code=model.code,
             )
         except Exception as exc:  # noqa: BLE001
+            # A retrieval failure (e.g. Qdrant/OpenAI/table unavailable) can leave
+            # the DB transaction aborted; roll back so this summary can still be
+            # persisted with an honest "no indexed knowledge" fallback.
+            self.session.rollback()
             _logger.warning(
                 "retrieval unavailable for summary citations",
                 extra={"motor_id": model.id, "error": str(exc)},

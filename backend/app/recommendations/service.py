@@ -120,7 +120,7 @@ class RecommendationService:
             model_id=model.id,
         )
         self.session.add(row)
-        self.session.flush()
+        self.session.commit()
 
     @staticmethod
     def _group_by_category(documents: list[Document]) -> dict[str, list[Document]]:
@@ -140,6 +140,9 @@ class RecommendationService:
             )
             return result.get("results", [])
         except Exception as exc:  # noqa: BLE001
+            # See SummaryService._gather_citations: roll back so template
+            # recommendations can still be persisted without citations.
+            self.session.rollback()
             _logger.warning(
                 "retrieval unavailable for recommendation citations",
                 extra={"motor_id": model.id, "error": str(exc)},
