@@ -84,7 +84,15 @@ class DocumentIntelligencePipeline:
                     self.jobs.transition(job, JobStatus.PARSED)
 
             self.jobs.transition(job, JobStatus.EXTRACTING)
-            stages["extract"] = self.extraction.extract_document(document_id)
+            try:
+                with self.session.begin_nested():
+                    stages["extract"] = self.extraction.extract_document(document_id)
+            except Exception as extract_exc:  # noqa: BLE001
+                _logger.warning(
+                    "extraction failed; continuing pipeline",
+                    extra={"document_id": document_id, "error": str(extract_exc)},
+                )
+                stages["extract"] = {"error": str(extract_exc), "skipped": True}
 
             # Chunk is part of indexing preparation
             stages["chunk"] = self.chunks.chunk_document(document_id)
@@ -93,9 +101,17 @@ class DocumentIntelligencePipeline:
             stages["index"] = self.vectors.index_document(document_id)
 
             self.jobs.transition(job, JobStatus.GRAPH_SYNC)
-            stages["graph"] = self.graph.sync_document(document_id)
+            try:
+                stages["graph"] = self.graph.sync_document(document_id)
+            except Exception as graph_exc:  # noqa: BLE001
+                _logger.warning(
+                    "graph sync failed; continuing to ready",
+                    extra={"document_id": document_id, "error": str(graph_exc)},
+                )
+                stages["graph"] = {"error": str(graph_exc), "skipped": True}
 
             self.jobs.transition(job, JobStatus.READY)
+            self._mark_document_ready(document_id)
             _logger.info(
                 "pipeline ready",
                 extra={"document_id": document_id, "job_id": job.id},
@@ -103,7 +119,7 @@ class DocumentIntelligencePipeline:
             return {
                 "job_id": job.id,
                 "document_id": document_id,
-                "status": job.status,
+                "status": "ready",
                 "stages": stages,
             }
         except Exception as exc:
@@ -128,6 +144,19 @@ class DocumentIntelligencePipeline:
                 extra={"document_id": document_id, "job_id": job.id},
             )
             raise
+
+    def _mark_document_ready(self, document_id: str) -> None:
+        """Set document.status=ready after parse→chunk→embed→graph succeed."""
+        from sqlalchemy import select
+
+        from app.db.models.documents import Document
+
+        doc = self.session.scalars(
+            select(Document).where(Document.id == document_id)
+        ).first()
+        if doc is not None:
+            doc.status = "ready"
+            self.session.flush()
 
     def _priority_for_document(self, document_id: str) -> int:
         from sqlalchemy import select

@@ -302,33 +302,100 @@ class ParseService:
         )
 
     def _load_bytes(self, document: Document) -> bytes:
-        key = self._storage_key(document)
-        if not key:
-            return b""
-        try:
-            return self.storage.download(key)
-        except Exception as exc:
+        """Load document bytes from MinIO or the local corpus mount.
+
+        Local corpus rows use ``storage_uri=local://...`` and store the
+        container path in ``catalog.extra_metadata["absolute_path"]``. Those
+        must never hit MinIO (empty bucket → NoSuchKey).
+        """
+        from pathlib import Path
+
+        uri = (document.storage_uri or "").strip()
+        catalog = document.catalog_entry
+        abs_path: str | None = None
+        if catalog and catalog.extra_metadata:
+            raw = catalog.extra_metadata.get("absolute_path")
+            if raw:
+                abs_path = str(raw)
+
+        if uri.startswith("local://"):
+            if abs_path:
+                path = Path(abs_path)
+                if path.is_file():
+                    return path.read_bytes()
+                raise AppError(
+                    f"Local corpus file missing: {abs_path}",
+                    error_code=ErrorCode.INGESTION_FAILED,
+                    status_code=500,
+                    details={"absolute_path": abs_path, "storage_uri": uri},
+                )
             raise AppError(
-                f"Failed to download document bytes: {exc}",
+                "Local corpus document has no absolute_path metadata",
                 error_code=ErrorCode.INGESTION_FAILED,
                 status_code=500,
-                details={"storage_key": key},
-            ) from exc
+                details={"storage_uri": uri, "document_id": document.id},
+            )
+
+        key = self._storage_key(document)
+        if key:
+            try:
+                return self.storage.download(key)
+            except Exception as exc:
+                _logger.warning(
+                    "storage download failed; trying absolute_path fallback",
+                    extra={"storage_key": key, "error": str(exc)},
+                )
+
+        if abs_path:
+            path = Path(abs_path)
+            if path.is_file():
+                return path.read_bytes()
+            raise AppError(
+                f"Local corpus file missing: {abs_path}",
+                error_code=ErrorCode.INGESTION_FAILED,
+                status_code=500,
+                details={"absolute_path": abs_path},
+            )
+
+        if key:
+            try:
+                return self.storage.download(key)
+            except Exception as exc:
+                raise AppError(
+                    f"Failed to download document bytes: {exc}",
+                    error_code=ErrorCode.INGESTION_FAILED,
+                    status_code=500,
+                    details={"storage_key": key},
+                ) from exc
+
+        return b""
 
     def _storage_key(self, document: Document) -> str | None:
+        """Return a MinIO/S3 object key, or None for local:// corpus URIs."""
+        uri = (document.storage_uri or "").strip()
+        if uri.startswith("local://"):
+            return None
+
         catalog = document.catalog_entry
         if catalog and catalog.extra_metadata:
             key = catalog.extra_metadata.get("storage_key")
             if key:
                 return str(key)
-        uri = document.storage_uri
+
         if not uri:
             return None
         bucket = self.storage.bucket
         prefix = f"{bucket}/"
         if uri.startswith(prefix):
             return uri[len(prefix) :]
-        if "/" in uri:
+        if uri.startswith("s3://"):
+            # s3://bucket/key → key
+            without = uri[len("s3://") :]
+            if "/" in without:
+                return without.split("/", 1)[1]
+            return without
+        if "/" in uri and not uri.startswith("/"):
+            # bucket/key form
             return uri.split("/", 1)[1]
         return uri
 

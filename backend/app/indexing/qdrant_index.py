@@ -138,17 +138,28 @@ class QdrantIndex:
 
         query_filter = qm.Filter(must=must) if must else None
         client = self._get_client()
-        hits = client.search(
-            collection_name=self.collection,
-            query_vector=vector,
-            query_filter=query_filter,
-            limit=limit,
-            with_payload=True,
-        )
+        # qdrant-client >=1.12 removed client.search; use query_points.
+        if hasattr(client, "query_points"):
+            response = client.query_points(
+                collection_name=self.collection,
+                query=vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+            )
+            hits = list(getattr(response, "points", None) or [])
+        else:  # pragma: no cover — legacy client
+            hits = client.search(
+                collection_name=self.collection,
+                query_vector=vector,
+                query_filter=query_filter,
+                limit=limit,
+                with_payload=True,
+            )
         return [
             {
                 "id": str(hit.id),
-                "score": float(hit.score),
+                "score": float(hit.score or 0.0),
                 "payload": dict(hit.payload or {}),
             }
             for hit in hits

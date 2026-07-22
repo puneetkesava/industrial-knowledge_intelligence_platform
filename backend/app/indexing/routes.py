@@ -77,8 +77,9 @@ class VerifyCitationsRequest(BaseModel):
 class PriorityEnqueueRequest(BaseModel):
     document_ids: list[str] | None = None
     hero_only: bool = True
-    limit: int = Field(default=20, ge=1, le=200)
+    limit: int = Field(default=20, ge=1, le=50000)
     async_worker: bool = False
+    status_filter: list[str] | None = None
 
 
 @router.post("/route", summary="Select parser tier for a document (dry-run)")
@@ -309,6 +310,7 @@ def priority_enqueue(
         hero_only=body.hero_only,
         limit=body.limit,
         async_worker=body.async_worker,
+        status_filter=body.status_filter,
     )
     return success_envelope(data, request_id=request_id)
 

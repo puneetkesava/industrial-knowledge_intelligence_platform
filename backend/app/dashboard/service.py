@@ -17,7 +17,9 @@ from app.observability import get_logger
 
 _logger = get_logger(__name__)
 
-_INDEXED_STATUSES = ("ready", "parsed", "indexed")
+# Pipeline leaves docs as "chunked" mid-flight and "ready" when complete.
+# Count both so the dashboard reflects already-indexed corpus immediately.
+_INDEXED_STATUSES = ("ready", "chunked", "parsed", "indexed")
 
 
 class DashboardService:

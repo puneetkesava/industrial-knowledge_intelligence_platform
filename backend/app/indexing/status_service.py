@@ -73,6 +73,7 @@ class IndexingStatusService:
         hero_only: bool = True,
         limit: int = 50,
         categories: list[str] | None = None,
+        status_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Select hero-motor (and optional category) documents for indexing."""
         stmt = (
@@ -86,8 +87,11 @@ class IndexingStatusService:
             )
         if categories:
             stmt = stmt.where(DocumentCatalog.doc_category.in_(categories))
+        if status_filter:
+            stmt = stmt.where(Document.status.in_(status_filter))
 
-        docs = list(self.session.scalars(stmt.limit(limit * 5)).all())
+        fetch_cap = min(max(limit * 5, limit), 25000)
+        docs = list(self.session.scalars(stmt.limit(fetch_cap)).all())
 
         def sort_key(doc: Document) -> tuple[int, str]:
             cat = doc.catalog_entry.doc_category if doc.catalog_entry else None
@@ -124,12 +128,17 @@ class IndexingStatusService:
         hero_only: bool = True,
         limit: int = 20,
         async_worker: bool = False,
+        status_filter: list[str] | None = None,
     ) -> dict[str, Any]:
         """Queue documents by adaptive priority (test reports first)."""
         if document_ids:
             targets = [{"document_id": i, "priority": 50} for i in document_ids]
         else:
-            targets = self.select_priority_subset(hero_only=hero_only, limit=limit)
+            targets = self.select_priority_subset(
+                hero_only=hero_only,
+                limit=limit,
+                status_filter=status_filter,
+            )
 
         # Sort by priority ascending (lower = sooner)
         targets.sort(key=lambda x: x.get("priority", 100))
