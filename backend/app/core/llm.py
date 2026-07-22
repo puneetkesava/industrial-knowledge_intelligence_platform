@@ -70,6 +70,17 @@ def resolve_router_provider(
     return None
 
 
+# Free-tier quotas often pin specific Gemini models to limit=0; try alternates.
+# Prefer flash-lite-latest — verified working on exhausted 2.0-flash free tiers.
+_GEMINI_FALLBACKS: tuple[str, ...] = (
+    "gemini-flash-lite-latest",
+    "gemini-flash-latest",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemma-4-26b-a4b-it",
+)
+
+
 def chat_complete(
     settings: Settings,
     *,
@@ -88,29 +99,52 @@ def chat_complete(
     if resolved is None:
         return None
     provider, model = resolved
-    try:
-        if provider == "openai":
-            return _openai_complete(
+    models = [model]
+    if provider == "google":
+        for alt in _GEMINI_FALLBACKS:
+            if alt not in models:
+                models.append(alt)
+    last_error: Exception | None = None
+    for attempt_model in models:
+        try:
+            if provider == "openai":
+                return _openai_complete(
+                    settings,
+                    model=attempt_model,
+                    prompt=prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    json_mode=json_mode,
+                )
+            return _gemini_complete(
                 settings,
-                model=model,
+                model=attempt_model,
                 prompt=prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                json_mode=json_mode,
             )
-        return _gemini_complete(
-            settings,
-            model=model,
-            prompt=prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-    except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            _logger.warning(
+                "llm_chat_complete_failed",
+                extra={
+                    "provider": provider,
+                    "model": attempt_model,
+                    "error": str(exc),
+                },
+            )
+            # Retry next Gemini model on quota / not-found; otherwise stop.
+            err = str(exc).lower()
+            if provider != "google" or not any(
+                tok in err for tok in ("429", "quota", "not found", "404", "invalid")
+            ):
+                break
+    if last_error is not None:
         _logger.warning(
-            "llm_chat_complete_failed",
-            extra={"provider": provider, "model": model, "error": str(exc)},
+            "llm_chat_complete_exhausted",
+            extra={"provider": provider, "models_tried": models, "error": str(last_error)},
         )
-        return None
+    return None
 
 
 def _openai_complete(
