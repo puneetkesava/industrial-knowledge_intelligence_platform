@@ -1,0 +1,12 @@
+﻿t=46s chunked=1232(+ 0) qdrant=2029 celery=233 worker=running mem=5.703GiB / 7.596GiB | 
+t=93s chunked=1232(+ 0) qdrant=2029 celery=233 worker=running mem=5.78GiB / 7.596GiB | 
+t=141s chunked=1234(+ 2) qdrant=2228 celery=231 worker=running mem=5.715GiB / 7.596GiB | 
+t=188s chunked=0(+ -1234) qdrant=2228 celery=230 worker=running mem=36.61MiB / 7.596GiB | 
+t=322s chunked=1235(+ 1) qdrant=2240 celery=230 worker=running mem=203.8MiB / 7.596GiB | 
+t=375s chunked=1236(+ 1) qdrant=2241 celery=229 worker=running mem=780.7MiB / 7.596GiB | 
+t=425s chunked=1236(+ 0) qdrant=2241 celery=229 worker=running mem=2.013GiB / 7.596GiB | 
+t=472s chunked=1236(+ 0) qdrant=2241 celery=229 worker=running mem=3.079GiB / 7.596GiB | 
+t=519s chunked=1236(+ 0) qdrant=2241 celery=229 worker=running mem=337.7MiB / 7.596GiB | 
+t=566s chunked=1236(+ 0) qdrant=2241 celery=229 worker=running mem=83.23MiB / 7.596GiB | 
+t=640s chunked=1236(+ 0) qdrant=2241 celery=229 worker=running mem=647.1MiB / 7.596GiB | 
+t=693s chunked=1236(+ 0) qdrant=2241 celery=229 worker=running mem=766.3MiB / 7.596GiB | 

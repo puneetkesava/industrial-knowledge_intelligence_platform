@@ -1,0 +1,10 @@
+CREATE TEMP TABLE demo_files(folder_path text, name text);
+INSERT INTO demo_files VALUES ('Chemical_Plants/Work_Orders','Chemical_Plant_Work_Orders.xlsx'),('Chemical_Plants/SOPs','Operational_PM_Checklist.pdf'),('Chemical_Plants/Inspection','VES5097_Valve_Inspection_Testing.pdf'),('Chemical_Plants/Instruction Manuals','Naphtha_Hydrotreating_Operating_Manual.pdf'),('Chemical_Plants/Instruction Manuals','CDU_II_Operating_Manual.pdf'),('Chemical_Plants/SOPs','Safe_Line_Opening_Procedure.pdf'),('Chemical_Plants/Product_Descriptions and Spare Parts','TTP_SSC_Shell_Tube_Cooler.pdf'),('Chemical_Plants/Maintenance','PM_Optimization_Chemical_Plants_GA.pdf'),('Chemical_Plants/Drawings','01_BFD_PFD_PID_Diagrams_Guide.pdf'),('Chemical_Plants/Maintenance','AIChE_Maintenance_Reliability_Part2.pdf'),('Chemical_Plants/Product_Descriptions and Spare Parts','SAP_Valves_Product_Catalog.pdf'),('Chemical_Plants/Drawings','08_Process_Flow_Diagrams_Lecture_Notes.pdf'),('Chemical_Plants/Sensors','Yokogawa_EJX510_EJA510_Pressure_Transmitter_Manual.pdf'),('Chemical_Plants/Sensors','Yokogawa_EJX110_EJA110_DP_Transmitter_Manual.pdf'),('Chemical_Plants/Sensors','Endress_Maintenance_Guide.pdf');
+SELECT d.id
+FROM documents d
+JOIN document_catalog c ON c.id=d.catalog_id
+JOIN demo_files f ON f.name=c.name AND f.folder_path=c.folder_path
+WHERE COALESCE(c.metadata->>'asset_domain','')='Chemical_Plants'
+  AND d.status <> 'chunked'
+ORDER BY d.id
+LIMIT 15;
