@@ -72,10 +72,13 @@ class Settings(BaseSettings):
     google_drive_folder_id: str = ""
     google_service_account_file: str = ""
 
-    # --- Optional integrations (wired in later milestones) ---
+    # --- Optional integrations (generation LLM; embeddings default to local) ---
     openai_api_key: str = ""
     google_api_key: str = ""
     anthropic_api_key: str = ""
+    # Generation model names — used when a corresponding API key is set
+    llm_primary_model: str = "gpt-4o"
+    llm_router_model: str = "gemini-2.0-flash"
 
     # --- Azure Document Intelligence (Milestone 2.1 — T1) ---
     azure_document_intelligence_endpoint: str = ""
@@ -84,8 +87,10 @@ class Settings(BaseSettings):
     parse_fallback_without_azure: bool = True
 
     # --- Embeddings (Milestone 2.4) ---
-    embedding_model: str = "text-embedding-3-small"
-    embedding_dimensions: int = 1536
+    # fastembed = local ONNX (default, no API key); openai = cloud fallback
+    embedding_provider: str = "fastembed"
+    embedding_model: str = "BAAI/bge-base-en-v1.5"
+    embedding_dimensions: int = 768
 
     # --- Qdrant (Milestone 2.5) ---
     qdrant_url: str = "http://localhost:6333"

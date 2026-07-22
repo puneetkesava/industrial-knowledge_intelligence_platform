@@ -1,8 +1,13 @@
-"""Embedding provider abstraction (Milestone 2.4)."""
+"""Embedding provider abstraction (Milestone 2.4).
+
+Default production path: local FastEmbed (BGE ONNX) — no API key required.
+OpenAI remains an optional fallback when ``embedding_provider=openai``.
+Tests (``app_env=test``) always resolve to ``HashEmbeddingProvider``.
+"""
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, ClassVar, Protocol
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AppError, ErrorCode
@@ -20,8 +25,66 @@ class EmbeddingProvider(Protocol):
     def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
 
 
+class FastEmbedProvider:
+    """Local ONNX embeddings via Qdrant's fastembed — no API key, CPU-friendly."""
+
+    provider = "fastembed"
+    _model_cache: ClassVar[dict[str, Any]] = {}
+
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        model_name: str | None = None,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self.model_name = model_name or self._settings.embedding_model
+        self.dimensions = int(self._settings.embedding_dimensions)
+        self.model_version = f"{self.provider}:{self.model_name}"
+
+    def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        model = self._get_model()
+        # fastembed yields numpy arrays (or lists); normalize to list[float]
+        vectors = [list(map(float, vec)) for vec in model.embed(texts)]
+        _logger.info(
+            "fastembed embeddings created",
+            extra={"count": len(texts), "model": self.model_name},
+        )
+        return vectors
+
+    def _get_model(self) -> Any:
+        cached = FastEmbedProvider._model_cache.get(self.model_name)
+        if cached is not None:
+            return cached
+        try:
+            from fastembed import TextEmbedding
+        except ImportError as exc:  # pragma: no cover
+            raise AppError(
+                "fastembed package is not installed — "
+                "pip install 'fastembed>=0.4.0'",
+                error_code=ErrorCode.SERVICE_UNAVAILABLE,
+                status_code=503,
+            ) from exc
+        try:
+            model = TextEmbedding(model_name=self.model_name)
+        except Exception as exc:  # noqa: BLE001
+            raise AppError(
+                f"Failed to load FastEmbed model '{self.model_name}': {exc}",
+                error_code=ErrorCode.SERVICE_UNAVAILABLE,
+                status_code=503,
+            ) from exc
+        FastEmbedProvider._model_cache[self.model_name] = model
+        _logger.info(
+            "fastembed model loaded",
+            extra={"model": self.model_name, "dimensions": self.dimensions},
+        )
+        return model
+
+
 class OpenAIEmbeddingProvider:
-    """Hackathon embedding provider — text-embedding-3-small (1536-d)."""
+    """Optional cloud embedding provider — text-embedding-3-small (1536-d)."""
 
     provider = "openai"
 
@@ -42,7 +105,6 @@ class OpenAIEmbeddingProvider:
         if not texts:
             return []
         client = self._get_client()
-        # OpenAI embeddings API — batch in chunks of 64
         vectors: list[list[float]] = []
         batch_size = 64
         for start in range(0, len(texts), batch_size):
@@ -51,7 +113,6 @@ class OpenAIEmbeddingProvider:
                 model=self.model_name,
                 input=batch,
             )
-            # Ensure order by index
             ordered = sorted(response.data, key=lambda d: d.index)
             vectors.extend([list(item.embedding) for item in ordered])
         _logger.info(
@@ -106,4 +167,15 @@ def get_embedding_provider(settings: Settings | None = None) -> EmbeddingProvide
     cfg = settings or get_settings()
     if cfg.app_env == "test":
         return HashEmbeddingProvider()
-    return OpenAIEmbeddingProvider(cfg)
+
+    provider = (cfg.embedding_provider or "fastembed").strip().lower()
+    if provider == "openai":
+        return OpenAIEmbeddingProvider(cfg)
+    if provider in {"fastembed", "local", "bge"}:
+        return FastEmbedProvider(cfg)
+
+    _logger.warning(
+        "unknown embedding_provider; defaulting to fastembed",
+        extra={"embedding_provider": provider},
+    )
+    return FastEmbedProvider(cfg)

@@ -147,12 +147,14 @@ class CopilotGraph:
 
         if (
             not degraded
-            and self.settings.openai_api_key
             and self.settings.app_env != "test"
         ):
-            llm = self._llm_synthesize(state, citations, tool_results)
-            if llm:
-                answer, reasoning = llm
+            from app.core.llm import generation_available
+
+            if generation_available(self.settings):
+                llm = self._llm_synthesize(state, citations, tool_results)
+                if llm:
+                    answer, reasoning = llm
 
         scores = [
             float(c.get("score") or 0.5)
@@ -453,34 +455,41 @@ class CopilotGraph:
         citations: list[dict[str, Any]],
         tool_results: dict[str, Any],
     ) -> tuple[str, str] | None:
-        try:
-            from openai import OpenAI
+        from app.core.llm import chat_complete
 
-            client = OpenAI(api_key=self.settings.openai_api_key)
-            context = {
-                "intent": (state.get("route") or {}).get("intent"),
-                "motor_id": state.get("motor_id"),
-                "citations": citations[:8],
-                "tool_results": _compact_tools(tool_results),
-            }
-            prompt = (
-                "You are Industrial Brain AI Copilot. Answer the engineer using ONLY "
-                "the provided tool evidence. Cite sources as [doc_id:chunk_id] when "
-                "available. If evidence is missing, say "
-                "'Not available in indexed knowledge'. "
-                "Return JSON with keys answer, reasoning.\n\n"
-                f"Question: {state['query']}\n"
-                f"Evidence JSON: {json.dumps(context, default=str)[:12000]}"
-            )
-            resp = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
+        context = {
+            "intent": (state.get("route") or {}).get("intent"),
+            "motor_id": state.get("motor_id"),
+            "citations": citations[:8],
+            "tool_results": _compact_tools(tool_results),
+        }
+        prompt = (
+            "You are Industrial Brain AI Copilot. Answer the engineer using ONLY "
+            "the provided tool evidence. Cite sources as [doc_id:chunk_id] when "
+            "available. If evidence is missing, say "
+            "'Not available in indexed knowledge'. "
+            "Return JSON with keys answer, reasoning.\n\n"
+            f"Question: {state['query']}\n"
+            f"Evidence JSON: {json.dumps(context, default=str)[:12000]}"
+        )
+        try:
+            raw = chat_complete(
+                self.settings,
+                prompt=prompt,
+                role="primary",
                 temperature=0.2,
                 max_tokens=800,
-                response_format={"type": "json_object"},
+                json_mode=True,
             )
-            raw = resp.choices[0].message.content or "{}"
-            data = json.loads(raw)
+            if not raw:
+                return None
+            # Gemini may wrap JSON in markdown fences
+            text = raw.strip()
+            if text.startswith("```"):
+                text = text.strip("`")
+                if text.lower().startswith("json"):
+                    text = text[4:].strip()
+            data = json.loads(text)
             answer = str(data.get("answer") or "").strip()
             reasoning = str(data.get("reasoning") or "").strip()
             if answer:

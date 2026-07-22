@@ -1,11 +1,12 @@
 """AI asset summary generation + cache (Phase 3).
 
 Deterministic template summary from registry specs + linked document
-inventory by default. When ``OPENAI_API_KEY`` is configured (and the app is
-not running in ``test`` mode) the deterministic overview is optionally
-rewritten by an LLM for a more natural narrative — the structured fields
-(key_specs, knowledge_gaps, citations) always come from verifiable data, and
-generation never fails if the LLM call is unavailable.
+inventory by default. When a generation API key is configured (OpenAI or
+Gemini) and the app is not running in ``test`` mode, the deterministic
+overview is optionally rewritten by an LLM for a more natural narrative —
+the structured fields (key_specs, knowledge_gaps, citations) always come
+from verifiable data, and generation never fails if the LLM call is
+unavailable.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.llm import generation_available, resolve_generation_provider
 from app.db.models.motors import MotorAiSummary, MotorModel
 from app.knowledge.retrieval import HybridRetrievalService
 from app.motors.documents import get_linked_documents, resolve_motor_model
@@ -27,7 +29,6 @@ from app.summary.schemas import KeySpecOut, SummaryOut
 _logger = get_logger(__name__)
 
 _TEMPLATE_MODEL_VERSION = "template:v1"
-_LLM_MODEL_VERSION = "openai:gpt-4o-mini"
 
 _SPEC_LABELS: tuple[tuple[str, str, str], ...] = (
     ("frame_size", "Frame size", "{}"),
@@ -94,11 +95,13 @@ class SummaryService:
 
         overview = self._deterministic_overview(model, key_specs, doc_inventory)
         model_version = _TEMPLATE_MODEL_VERSION
-        if self.settings.openai_api_key and self.settings.app_env != "test":
+        if generation_available(self.settings):
             llm_overview = self._llm_overview(model, key_specs, doc_inventory, context)
             if llm_overview:
                 overview = llm_overview
-                model_version = _LLM_MODEL_VERSION
+                resolved = resolve_generation_provider(self.settings)
+                if resolved:
+                    model_version = f"{resolved[0]}:{resolved[1]}"
 
         honesty_note = (
             _NO_KNOWLEDGE_NOTE
@@ -194,7 +197,7 @@ class SummaryService:
                 motor_type_code=model.code,
             )
         except Exception as exc:  # noqa: BLE001
-            # A retrieval failure (e.g. Qdrant/OpenAI/table unavailable) can leave
+            # A retrieval failure (e.g. Qdrant/table unavailable) can leave
             # the DB transaction aborted; roll back so this summary can still be
             # persisted with an honest "no indexed knowledge" fallback.
             self.session.rollback()
@@ -233,36 +236,30 @@ class SummaryService:
         doc_inventory: dict[str, int],
         context: str,
     ) -> str | None:
+        from app.core.llm import chat_complete
+
+        spec_lines = "\n".join(f"- {s.label}: {s.value}" for s in key_specs)
+        doc_lines = "\n".join(
+            f"- {v} {k} document(s)" for k, v in doc_inventory.items()
+        )
+        prompt = (
+            "Write a concise 2-3 sentence factual overview of this "
+            "industrial motor "
+            "for a maintenance engineer. Only use the facts given below — do not "
+            "invent specifications, dates, or capabilities.\n\n"
+            f"Motor: {model.name} ({model.code})\n"
+            f"Specifications:\n{spec_lines or '- none indexed'}\n"
+            f"Indexed documents:\n{doc_lines or '- none indexed'}\n"
+            f"Relevant excerpts:\n{context[:1500] if context else 'none'}"
+        )
         try:
-            from openai import OpenAI
-        except ImportError:
-            return None
-        api_key = (self.settings.openai_api_key or "").strip()
-        if not api_key:
-            return None
-        try:
-            client = OpenAI(api_key=api_key)
-            spec_lines = "\n".join(f"- {s.label}: {s.value}" for s in key_specs)
-            doc_lines = "\n".join(
-                f"- {v} {k} document(s)" for k, v in doc_inventory.items()
-            )
-            prompt = (
-                "Write a concise 2-3 sentence factual overview of this "
-                "industrial motor "
-                "for a maintenance engineer. Only use the facts given below — do not "
-                "invent specifications, dates, or capabilities.\n\n"
-                f"Motor: {model.name} ({model.code})\n"
-                f"Specifications:\n{spec_lines or '- none indexed'}\n"
-                f"Indexed documents:\n{doc_lines or '- none indexed'}\n"
-                f"Relevant excerpts:\n{context[:1500] if context else 'none'}"
-            )
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
+            text = chat_complete(
+                self.settings,
+                prompt=prompt,
+                role="primary",
                 temperature=0.2,
                 max_tokens=200,
             )
-            text = (response.choices[0].message.content or "").strip()
             return text or None
         except Exception as exc:  # noqa: BLE001
             _logger.warning(

@@ -276,32 +276,45 @@ class QueryRouter:
         )
 
     def _llm_classify(self, query: str) -> QueryIntent | None:
-        """Optional fast-model routing (Gemini Flash or OpenAI mini)."""
+        """Optional fast-model routing (Gemini Flash or OpenAI mini).
+
+        Uses Gemini when ``google_api_key`` is set and no OpenAI key exists;
+        OpenAI when ``openai_api_key`` is set. Returns ``None`` (no throw)
+        when neither key is configured or the call fails.
+        """
+        from app.core.llm import chat_complete, resolve_router_provider
+
+        if resolve_router_provider(self.settings) is None:
+            return None
+
         labels = ", ".join(i.value for i in QueryIntent)
         prompt = (
             "Classify the industrial engineering question into exactly one intent "
             f"from: {labels}. Reply with only the intent name.\n\nQuestion: {query}"
         )
         try:
-            if self.settings.openai_api_key:
-                from openai import OpenAI
-
-                client = OpenAI(api_key=self.settings.openai_api_key)
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
-                    max_tokens=20,
-                )
-                raw = (resp.choices[0].message.content or "").strip()
-                return (
-                    QueryIntent(raw) if raw in {i.value for i in QueryIntent} else None
-                )
+            raw = chat_complete(
+                self.settings,
+                prompt=prompt,
+                role="router",
+                temperature=0,
+                max_tokens=20,
+            )
+            if not raw:
+                return None
+            # Models sometimes wrap the label — take first token-ish match
+            cleaned = raw.strip().split()[0].strip(".,:;\"'")
+            if cleaned in {i.value for i in QueryIntent}:
+                return QueryIntent(cleaned)
+            for intent in QueryIntent:
+                if intent.value.lower() in raw.lower():
+                    return intent
+            return None
         except Exception as exc:  # noqa: BLE001
             _logger.warning(
                 "fast_model_classify_failed", extra={"error": str(exc)}
             )
-        return None
+            return None
 
     def to_dict(self, result: RouteResult) -> dict[str, Any]:
         return result.model_dump()

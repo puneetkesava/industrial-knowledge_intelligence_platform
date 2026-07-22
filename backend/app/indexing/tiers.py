@@ -116,3 +116,4 @@ class RoutingContext:
     folder_path: str | None = None
     filename: str | None = None
     force_tier: ParserTier | None = None
+    document_id: str | None = None

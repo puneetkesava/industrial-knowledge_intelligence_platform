@@ -298,6 +298,7 @@ class ParseService:
             folder_path=catalog.folder_path if catalog else None,
             filename=filename,
             force_tier=forced,
+            document_id=document.id,
         )
 
     def _load_bytes(self, document: Document) -> bytes:
