@@ -189,7 +189,8 @@ services:
         "app.workers.celery_app.celery_app",
         "worker",
         "--loglevel=info",
-        "--concurrency=2",
+        "--concurrency=1",
+        "--prefetch-multiplier=1",
       ]
     env_file:
       - path: .env
