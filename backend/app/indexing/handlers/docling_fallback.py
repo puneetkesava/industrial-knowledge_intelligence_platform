@@ -50,7 +50,7 @@ class DoclingFallbackHandler:
                     "T2 handler returned empty/near-empty full_text after fallback",
                     extra={
                         "document_id": document_id,
-                        "filename": ctx.filename,
+                        "doc_filename": ctx.filename,
                         "reason": reason,
                         "parser_name": output.parser_name,
                         "page_count": output.page_count,

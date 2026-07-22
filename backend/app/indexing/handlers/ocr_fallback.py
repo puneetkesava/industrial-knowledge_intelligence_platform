@@ -83,7 +83,7 @@ def ocr_pdf_pages(
         "tesseract OCR fallback succeeded",
         extra={
             "document_id": document_id,
-            "filename": filename,
+            "doc_filename": filename,
             "page_count": len(pages),
             "char_count": len(joined),
         },

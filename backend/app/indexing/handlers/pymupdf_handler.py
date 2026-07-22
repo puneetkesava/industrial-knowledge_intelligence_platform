@@ -73,7 +73,7 @@ class PyMuPdfHandler:
                 "native PDF text extraction empty/near-empty; attempting OCR",
                 extra={
                     "document_id": document_id,
-                    "filename": ctx.filename,
+                    "doc_filename": ctx.filename,
                     "reason": reason,
                     "page_count": len(pages),
                 },
@@ -103,7 +103,7 @@ class PyMuPdfHandler:
                     "PDF text extraction and OCR both failed",
                     extra={
                         "document_id": document_id,
-                        "filename": ctx.filename,
+                        "doc_filename": ctx.filename,
                         "reason": reason,
                         "ocr_error": str(exc),
                     },
